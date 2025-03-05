@@ -1,10 +1,12 @@
 import os
+import threading
 import discord
 from dotenv import load_dotenv
 
 from config_manager import ConfigManager
 from pr_handler import PRHandler
 from command_handler import CommandHandler
+from webhook_server import set_bot_instance, run_webhook_server, get_public_url
 
 class PRBot(discord.Client):
     """Discord bot for managing GitHub pull request notifications."""
@@ -21,6 +23,9 @@ class PRBot(discord.Client):
         
         # Load existing configuration
         self.config_manager.load_config()
+        
+        # Set this bot instance for the webhook server
+        set_bot_instance(self)
     
     async def setup_hook(self) -> None:
         """Called when the client is done preparing the data received from Discord."""
@@ -52,19 +57,21 @@ class PRBot(discord.Client):
         guild_id = message.guild.id if message.guild else None
         config = self.config_manager.get_guild_config(guild_id)
         
-        # Check for admin commands
+        # Check for admin commands (includes webhook command now)
         if message.content.startswith('!prbot'):
             await self.command_handler.handle_admin_commands(message, config, guild_id)
             return
-        
+            
         # Get the post and watch channels
         post_channel = self.command_handler.get_post_channel(message, config)
         watch_channel_id = config.get("watch_channel")
         is_watch_channel = message.channel.id == watch_channel_id if watch_channel_id else False
         
-        # Process GitHub messages with embeds
-        if is_watch_channel and message.author.name == "GitHub" and message.embeds:
-            await self.pr_handler.process_github_embeds(message, post_channel)
+        # Process GitHub messages with embeds - prioritize embeds over content
+        if is_watch_channel and message.author.name == "GitHub":
+            if message.embeds:
+                await self.pr_handler.process_github_embeds(message, post_channel)
+                return  # Don't process further if we handled embeds
         
         # Simple parroting - if message is in watch channel, echo to post channel
         if is_watch_channel and message.channel.id != post_channel.id:
@@ -94,7 +101,20 @@ if __name__ == "__main__":
     
     # Retrieve the token from the environment variables
     TOKEN = os.getenv('DISCORD_TOKEN')
+    WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', '0.0.0.0')
+    WEBHOOK_PORT = int(os.getenv('WEBHOOK_PORT', '5000'))
     
-    # Initialize and run the bot
+    # Initialize the bot
     bot = PRBot()
+    
+    # Start the webhook server in a separate thread
+    webhook_thread = threading.Thread(
+        target=run_webhook_server, 
+        kwargs={'host': WEBHOOK_HOST, 'port': WEBHOOK_PORT},
+        daemon=True
+    )
+    webhook_thread.start()
+
+    
+    # Run the Discord bot
     bot.run(TOKEN)
