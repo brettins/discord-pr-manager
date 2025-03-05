@@ -43,32 +43,72 @@ async def on_message(message):
     # if message.channel.id != YOUR_TARGET_CHANNEL_ID:
     #     return
 
-    match = pr_pattern.search(message.content)
-    if match:
-        repository = match.group(1)       # e.g., Story-City/web-client
-        action = match.group(2)           # e.g., opened, closed
-        pr_number = match.group(3)        # e.g., 410
-        description = match.group(4)      # additional details if any
+    # Handle manual PR thread creation command
+    if message.content.startswith('!pr'):
+        # Extract the content after the command
+        pr_content = message.content[3:].strip()
+        
+        # Check if the content matches PR notification format
+        match = pr_pattern.search(pr_content)
+        if match:
+            repository = match.group(1)
+            action = match.group(2)
+            pr_number = match.group(3)
+            description = match.group(4)
+            
+            key = (repository, pr_number)
+            new_content = f'[{repository}] Pull request {action}: #{pr_number} {description}'
+            
+            if key in pr_notifications:
+                # PR already tracked, update the existing message
+                original_message = pr_notifications[key]
+                try:
+                    await original_message.edit(content=new_content)
+                    
+                    # If this is a "closed" action, add a visual indicator
+                    if action.lower() == "closed":
+                        await original_message.add_reaction("✅")
+                    
+                    # Acknowledge the update
+                    await message.add_reaction("👍")
+                except Exception as e:
+                    print(f"Failed to update message: {e}")
+                    # If update fails, create a new message
+                    await message.channel.send(f"Error updating PR status: {e}")
+            else:
+                # New PR, create a message and store it
+                bot_message = await message.channel.send(new_content)
+                pr_notifications[key] = bot_message
+                
+        else:
+            # Content doesn't match PR format, just echo it
+            await message.channel.send(f"Creating PR thread: {pr_content}")
+            
+    # Process normal PR notifications (not from !pr command)
+    elif pr_pattern.search(message.content):
+        match = pr_pattern.search(message.content)
+        repository = match.group(1)
+        action = match.group(2)
+        pr_number = match.group(3)
+        description = match.group(4)
 
         key = (repository, pr_number)
-        new_content = f'[{repository}] Pull request {action}: #{pr_number} {description}'
-
+        
         if key in pr_notifications:
+            # Update existing PR notification
             original_message = pr_notifications[key]
-            print("pr notifictoins?")
             try:
-                # Edit the original message with the updated content.
-                print("trye 1")
-                await original_message.edit(content=new_content)
-                # Optionally, delete the new duplicate message.
-                print("trye 2")
+                await original_message.edit(content=message.content)
+                
+                if action.lower() == "closed":
+                    await original_message.add_reaction("✅")
+                
+                # Delete duplicate notification
                 await message.delete()
-            except discord.Forbidden:
-                print("Bot lacks permission to edit or delete messages.")
-            except discord.HTTPException as e:
+            except Exception as e:
                 print(f"Failed to update message: {e}")
         else:
-            # If this is a new PR notification, store it.
+            # New PR notification, store it
             pr_notifications[key] = message
 
 client.run(TOKEN)
