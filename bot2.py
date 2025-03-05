@@ -22,7 +22,7 @@ pr_notifications = {}
 
 # Regex to match a pull request notification message.
 # Adjust this regex based on your actual notification format.
-pr_pattern = re.compile(r'\[(.*?)\]\s+Pull request (\w+):\s+#(\d+)\s+(.*)')
+pr_pattern = re.compile(r'\[(.*?)\] Pull request (\w+): #(\d+) (.*)')
 
 # Configuration storage - per guild settings
 guild_configs = {}
@@ -165,9 +165,50 @@ async def on_message(message):
     watch_channel_id = config.get("watch_channel")
     is_watch_channel = message.channel.id == watch_channel_id if watch_channel_id else False
     
-    # Debug message to confirm channels
-    print(f"Message in channel {message.channel.id}, watch channel: {watch_channel_id}, is watch: {is_watch_channel}")
-    
+    # Process GitHub messages with embeds
+    if is_watch_channel and message.author.name == "GitHub" and message.embeds:
+        for embed in message.embeds:
+            # Check for PR related embeds
+            if embed.title and "Pull request" in embed.title:
+                match = pr_pattern.search(embed.title)
+                if match:
+                    repository = match.group(1)    # e.g., "brettins/bot-test-repository"
+                    action = match.group(2)        # e.g., "opened", "closed"
+                    pr_number = match.group(3)     # e.g., "3"
+                    description = match.group(4)   # e.g., "Test PR for Discord Bot"
+                    
+                    # Create a unique key for this PR
+                    key = (repository, pr_number)
+                    
+                    # Format a message for this PR
+                    new_content = f"## [{repository}] PR #{pr_number}: {description}\n"
+                    new_content += f"**Status:** {action}\n"
+                    if embed.description:
+                        new_content += f"**Description:** {embed.description}\n"
+                    new_content += f"**Link:** {embed.url}"
+                    
+                    # Check if we've seen this PR before
+                    if key in pr_notifications:
+                        # Update existing message
+                        try:
+                            original_message = pr_notifications[key]
+                            await original_message.edit(content=new_content)
+                            
+                            # Add status indicators based on action
+                            if action.lower() == "closed":
+                                await original_message.add_reaction("✅")
+                            print(f"Updated PR message for {repository} #{pr_number}")
+                        except Exception as e:
+                            print(f"Failed to update PR message: {e}")
+                    else:
+                        # Create a new message for this PR
+                        try:
+                            pr_msg = await post_channel.send(new_content)
+                            pr_notifications[key] = pr_msg
+                            print(f"Created new PR message for {repository} #{pr_number}")
+                        except Exception as e:
+                            print(f"Failed to create PR message: {e}")
+
     # Simple parroting - if message is in watch channel, echo to post channel
     if is_watch_channel and message.channel.id != post_channel.id:  # Avoid loops if same channel
         # Forward the message to the post channel
