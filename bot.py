@@ -40,8 +40,7 @@ class PRBot(discord.Client):
                 print(f'Connected to guild: {guild.name} (ID: {guild.id})')
                 if guild.id not in self.config_manager.guild_configs:
                     self.config_manager.guild_configs[guild.id] = {
-                        "watch_channel": None,
-                        "post_channel": None
+                        "webhook_token": None
                     }
                     self.config_manager.save_config()
         else:
@@ -62,36 +61,9 @@ class PRBot(discord.Client):
             await self.command_handler.handle_admin_commands(message, config, guild_id)
             return
             
-        # Get the post and watch channels
-        post_channel = self.command_handler.get_post_channel(message, config)
-        watch_channel_id = config.get("watch_channel")
-        is_watch_channel = message.channel.id == watch_channel_id if watch_channel_id else False
-        
-        # Process GitHub messages with embeds - prioritize embeds over content
-        if is_watch_channel and message.author.name == "GitHub":
-            if message.embeds:
-                await self.pr_handler.process_github_embeds(message, post_channel)
-                return  # Don't process further if we handled embeds
-        
-        # Simple parroting - if message is in watch channel, echo to post channel
-        if is_watch_channel and message.channel.id != post_channel.id:
-            await self.forward_message(message, post_channel)
-        
-        # Handle PR commands and notifications
+        # Handle PR commands
         if message.content.startswith('!pr'):
             await self.pr_handler.handle_pr_command(message)
-        elif self.pr_handler.PR_PATTERN.search(message.content):
-            await self.pr_handler.process_pr_notification(message)
-    
-    async def forward_message(self, message: discord.Message, post_channel: discord.TextChannel) -> None:
-        """Forward a message from watch channel to post channel."""
-        content = f"**From {message.author.display_name} in {message.channel.name}:** {message.content}"
-        
-        # Also forward any attachments/embeds
-        files = [await attachment.to_file() for attachment in message.attachments]
-        
-        await post_channel.send(content, files=files if files else None)
-        print(f"Forwarded message from {message.channel.name} to {post_channel.name}")
 
 
 # Main execution
