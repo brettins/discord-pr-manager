@@ -1,6 +1,7 @@
 # This example requires the 'message_content' intent.
 import os
 import re
+import json
 
 from dotenv import load_dotenv
 import discord
@@ -23,12 +24,47 @@ pr_notifications = {}
 # Adjust this regex based on your actual notification format.
 pr_pattern = re.compile(r'\[(.*?)\]\s+Pull request (\w+):\s+#(\d+)\s+(.*)')
 
+# Configuration storage - per guild settings
+guild_configs = {}
+
+# File to store persistent settings
+CONFIG_FILE = "bot_config.json"
+
+# Load existing configuration if available
+def load_config():
+    global guild_configs
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                # JSON stores keys as strings, convert back to int for guild IDs
+                loaded_config = json.load(f)
+                guild_configs = {int(k): v for k, v in loaded_config.items()}
+                print(f"Loaded configuration for {len(guild_configs)} guilds")
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+
+# Save configuration to file
+def save_config():
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(guild_configs, f)
+    except Exception as e:
+        print(f"Error saving configuration: {e}")
+
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
+    load_config()
+    
     if client.guilds:
         for guild in client.guilds:
             print(f'Connected to guild: {guild.name} (ID: {guild.id})')
+            if guild.id not in guild_configs:
+                guild_configs[guild.id] = {
+                    "watch_channel": None,
+                    "post_channel": None
+                }
+                save_config()
     else:
         print("No guilds found. The bot isn't in any server.")
 
@@ -38,10 +74,113 @@ async def on_message(message):
     # Avoid processing messages sent by the bot itself.
     if message.author == client.user:
         return
+        
+    # Get guild configuration
+    guild_id = message.guild.id if message.guild else None
+    config = guild_configs.get(guild_id, {}) if guild_id else {}
+    
+    # Check for admin commands to configure the bot
+    if message.content.startswith('!prbot'):
+        # Check for admin permissions
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("You need administrator permissions to configure the bot.")
+            return
+            
+        parts = message.content.split()
+        if len(parts) < 2:
+            await message.channel.send("Available commands:\n"
+                                    "!prbot watch <#channel> or !prbot watch channel_id - Set channel to watch for PR notifications\n"
+                                    "!prbot post <#channel> or !prbot post channel_id - Set channel to post PR threads\n"
+                                    "!prbot status - Show current configuration")
+            return
 
-    # Optional: Check if the message is in a specific channel by comparing channel IDs.
-    # if message.channel.id != YOUR_TARGET_CHANNEL_ID:
-    #     return
+        # Handle watch command            
+        if parts[1] == "watch":
+            target_channel = None
+            
+            # Check if a channel was mentioned using #channel format
+            if message.channel_mentions:
+                target_channel = message.channel_mentions[0]
+            # If not, try to treat the third parameter as a channel ID
+            elif len(parts) >= 3:
+                try:
+                    channel_id = int(parts[2])
+                    target_channel = client.get_channel(channel_id)
+                except ValueError:
+                    await message.channel.send("Invalid channel ID. Please provide a valid channel ID or mention.")
+                    return
+            
+            if target_channel:
+                config["watch_channel"] = target_channel.id
+                guild_configs[guild_id] = config
+                save_config()
+                await message.channel.send(f"Watch channel set to {target_channel.mention}")
+            else:
+                await message.channel.send("Please specify a valid channel.")
+                
+        # Handle post command           
+        elif parts[1] == "post":
+            target_channel = None
+            
+            # Check if a channel was mentioned using #channel format
+            if message.channel_mentions:
+                target_channel = message.channel_mentions[0]
+            # If not, try to treat the third parameter as a channel ID
+            elif len(parts) >= 3:
+                try:
+                    channel_id = int(parts[2])
+                    target_channel = client.get_channel(channel_id)
+                except ValueError:
+                    await message.channel.send("Invalid channel ID. Please provide a valid channel ID or mention.")
+                    return
+            
+            if target_channel:
+                config["post_channel"] = target_channel.id
+                guild_configs[guild_id] = config
+                save_config()
+                await message.channel.send(f"Post channel set to {target_channel.mention}")
+            else:
+                await message.channel.send("Please specify a valid channel.")
+            
+        elif parts[1] == "status":
+            watch_channel = client.get_channel(config.get("watch_channel")) if config.get("watch_channel") else None
+            post_channel = client.get_channel(config.get("post_channel")) if config.get("post_channel") else None
+            
+            status = "Current configuration:\n"
+            status += f"Watch channel: {watch_channel.mention if watch_channel else 'Not set'}\n"
+            status += f"Post channel: {post_channel.mention if post_channel else 'Not set'}"
+            await message.channel.send(status)
+        
+        return
+
+    # Get the post channel (where PR threads will be created)
+    post_channel = None
+    if config.get("post_channel"):
+        post_channel = client.get_channel(config["post_channel"])
+    
+    if not post_channel:
+        post_channel = message.channel  # Default to current channel if not configured
+    
+    # Check if this is the watch channel
+    watch_channel_id = config.get("watch_channel")
+    is_watch_channel = message.channel.id == watch_channel_id if watch_channel_id else False
+    
+    # Debug message to confirm channels
+    print(f"Message in channel {message.channel.id}, watch channel: {watch_channel_id}, is watch: {is_watch_channel}")
+    
+    # Simple parroting - if message is in watch channel, echo to post channel
+    if is_watch_channel and message.channel.id != post_channel.id:  # Avoid loops if same channel
+        # Forward the message to the post channel
+        content = f"**From {message.author.display_name} in {message.channel.name}:** {message.content}"
+        
+        # Also forward any attachments/embeds
+        files = [await attachment.to_file() for attachment in message.attachments]
+        
+        await post_channel.send(content, files=files if files else None)
+        print(f"Parroted message from {message.channel.name} to {post_channel.name}")
+
+    # Process PR notifications logic would go here
+    # For now we're just parroting to verify channels are working
 
     # Handle manual PR thread creation command
     if message.content.startswith('!pr'):
