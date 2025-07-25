@@ -44,6 +44,7 @@ class PRHandler:
             
             embed.add_field(name="Repository", value=repository, inline=True)
             embed.add_field(name="Status", value=f"{status_icon} {action.capitalize()}", inline=True)
+            embed.add_field(name="Bot", value="🚧 LOCAL DEBUG", inline=True)
             embed.set_footer(text=f"PR #{pr_number} • {repository}", icon_url="https://github.githubassets.com/favicons/favicon.png")
             
             # Try to build a GitHub URL
@@ -70,7 +71,10 @@ class PRHandler:
                     await thread.send(f"🧵 **Thread created for PR #{pr_number}**\nUpdates and comments will appear here.")
                     
                 except Exception as e:
-                    print(f"Failed to create thread: {e}")
+                    print(f"❌ THREAD CREATION FAILED: {e}")
+                    print(f"❌ Exception type: {type(e)}")
+                    import traceback
+                    print(f"❌ Full traceback: {traceback.format_exc()}")
                 
                 await message.add_reaction("✅")
         else:
@@ -146,11 +150,17 @@ class PRHandler:
                 
                 # Create thread
                 thread_name = f"PR #{pr_number}: {title[:80]}..." if len(title) > 80 else f"PR #{pr_number}: {title}"
+                print(f"DEBUG: Attempting to create thread '{thread_name}' for message {message.id}")
+                print(f"DEBUG: Channel type: {channel.type}")
+                print(f"DEBUG: Bot permissions in channel: {channel.permissions_for(channel.guild.me)}")
+                
                 thread = await message.create_thread(name=thread_name)
                 self.pr_threads[key] = thread
+                print(f"DEBUG: Thread created successfully! Thread ID: {thread.id}")
                 
                 # Send initial thread message
                 await thread.send(f"🧵 **Thread created for PR #{pr_number}**\nUpdates and comments will appear here.")
+                print(f"DEBUG: Initial message sent to thread")
                 
                 return message
             except Exception as e:

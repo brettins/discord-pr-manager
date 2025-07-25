@@ -30,24 +30,24 @@ def get_status_icon(status: str) -> str:
     """Get appropriate emoji icon for different PR statuses."""
     status = status.lower()
     
-    # Before merge states
+    # Before merge states - work in progress
     if status == "opened" or status == "open":
-        return "🟢"  # Green circle for open
+        return "🚀"  # Rocket for newly opened (launch)
     elif status == "reopened":
-        return "🔄"  # Refresh for reopened
+        return "🔄"  # Refresh for reopened (cycle back)
     elif status == "ready_for_review":
-        return "👀"  # Eyes for ready for review
+        return "👀"  # Eyes for ready for review (looking for approval)
     elif status == "review_requested":
-        return "📋"  # Clipboard for review requested
+        return "📝"  # Memo for review requested (needs feedback)
     elif status == "draft":
-        return "📝"  # Memo for draft
-    # Merged state
+        return "🛠️"  # Hammer and wrench for draft (work in progress)
+    # Merged state - success!
     elif status == "merged":
-        return "🟣"  # Purple circle for merged
-    # Abandoned states  
+        return "✅"  # Check mark for merged (completed successfully)
+    # Abandoned states - stopped/failed
     elif status == "closed":
-        return "🔴"  # Red circle for closed
+        return "❌"  # X mark for closed (rejected/abandoned)
     elif status == "deleted":
-        return "🗑️"  # Trash for deleted
+        return "🗑️"  # Trash for deleted (removed)
     else:
-        return "🟢"  # Default to green circle
+        return "🚀"  # Default to rocket for new PRs

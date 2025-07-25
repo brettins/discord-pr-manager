@@ -34,13 +34,13 @@ def set_bot_instance(bot_instance):
 @app.route('/webhook/<int:guild_id>/<int:channel_id>/<token>', methods=['POST'])
 def github_webhook(guild_id: int, channel_id: int, token: str):
     """
-    Handle incoming GitHub webhooks with guild and channel info embedded in URL.
+    Handle incoming GitHub webhooks for a guild.
     
     URL format: /webhook/{guild_id}/{channel_id}/{token}
-    The token is a simple verification string but not used for complex validation.
     """
+    
     # Print headers and request info for debugging
-    print(f"Received webhook for guild {guild_id}, channel {channel_id}")
+    print(f"Received webhook for guild {guild_id}, using configured channel {channel_id}")
     
     # Check if this is a ping event
     event_type = request.headers.get('X-GitHub-Event')
@@ -266,13 +266,19 @@ async def process_pr_review(payload: Dict[str, Any], guild_id: int, channel_id: 
         pr_number = str(pr_data.get('number', ''))
         repo_name = payload.get('repository', {}).get('full_name', '')
         
+        # Review details
         reviewer = review_data.get('user', {}).get('login', 'Unknown')
         review_state = review_data.get('state', '').lower()
         review_body = review_data.get('body', '')
+        review_url = review_data.get('html_url', '')
+        
+        # PR details for context
+        pr_title = pr_data.get('title', 'Untitled PR')
+        pr_author = pr_data.get('user', {}).get('login', 'Unknown')
         
         pr_key = (repo_name, pr_number)
         
-        # Create thread update message
+        # Create enhanced thread update message
         if review_state == 'approved':
             emoji = "✅"
             status = "approved"
@@ -286,9 +292,14 @@ async def process_pr_review(payload: Dict[str, Any], guild_id: int, channel_id: 
             emoji = "📝"
             status = review_state
         
-        update_message = f"{emoji} **{reviewer}** {status} this PR"
+        # Enhanced message with PR context
+        update_message = f"{emoji} **{reviewer}** {status} PR **\"{pr_title}\"** by **{pr_author}**"
+        
         if review_body:
             update_message += f"\n\n*Review:* {truncate_text(review_body, 300)}"
+        
+        if review_url:
+            update_message += f"\n\n[View Review]({review_url})"
         
         await bot.pr_handler.post_thread_update(pr_key, update_message)
         print(f"Posted review update for {repo_name} #{pr_number}")
@@ -315,19 +326,31 @@ async def process_pr_comment(payload: Dict[str, Any], guild_id: int, channel_id:
         pr_number = str(issue_data.get('number', ''))
         repo_name = payload.get('repository', {}).get('full_name', '')
         
+        # Comment details
         commenter = comment_data.get('user', {}).get('login', 'Unknown')
         comment_body = comment_data.get('body', '')
+        comment_url = comment_data.get('html_url', '')
+        
+        # PR details for context
+        pr_title = issue_data.get('title', 'Untitled PR')
+        pr_author = issue_data.get('user', {}).get('login', 'Unknown')
         
         pr_key = (repo_name, pr_number)
         
         if action == 'created':
             emoji = "💬"
-            update_message = f"{emoji} **{commenter}** commented on this PR\n\n*Comment:* {truncate_text(comment_body, 400)}"
+            update_message = f"{emoji} **{commenter}** commented on PR **\"{pr_title}\"** by **{pr_author}**"
         elif action == 'edited':
             emoji = "✏️"
-            update_message = f"{emoji} **{commenter}** edited their comment\n\n*Updated comment:* {truncate_text(comment_body, 400)}"
+            update_message = f"{emoji} **{commenter}** edited their comment on PR **\"{pr_title}\"**"
         else:
             return  # Don't process other comment actions
+        
+        if comment_body:
+            update_message += f"\n\n*Comment:* {truncate_text(comment_body, 400)}"
+        
+        if comment_url:
+            update_message += f"\n\n[View Comment]({comment_url})"
         
         await bot.pr_handler.post_thread_update(pr_key, update_message)
         print(f"Posted comment update for {repo_name} #{pr_number}")
@@ -349,18 +372,29 @@ async def process_pr_review_comment(payload: Dict[str, Any], guild_id: int, chan
         pr_number = str(pr_data.get('number', ''))
         repo_name = payload.get('repository', {}).get('full_name', '')
         
+        # Review comment details
         commenter = comment_data.get('user', {}).get('login', 'Unknown')
         comment_body = comment_data.get('body', '')
+        comment_url = comment_data.get('html_url', '')
         file_path = comment_data.get('path', '')
+        
+        # PR details for context
+        pr_title = pr_data.get('title', 'Untitled PR')
+        pr_author = pr_data.get('user', {}).get('login', 'Unknown')
         
         pr_key = (repo_name, pr_number)
         
         if action == 'created':
             emoji = "🔍"
-            update_message = f"{emoji} **{commenter}** commented on code"
+            update_message = f"{emoji} **{commenter}** commented on code in PR **\"{pr_title}\"** by **{pr_author}**"
             if file_path:
-                update_message += f" in `{file_path}`"
-            update_message += f"\n\n*Review comment:* {truncate_text(comment_body, 400)}"
+                update_message += f"\n\n*File:* `{file_path}`"
+            
+            if comment_body:
+                update_message += f"\n\n*Code review:* {truncate_text(comment_body, 400)}"
+            
+            if comment_url:
+                update_message += f"\n\n[View Code Comment]({comment_url})"
         else:
             return  # Don't process other review comment actions
         
