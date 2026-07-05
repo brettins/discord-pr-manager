@@ -1,4 +1,5 @@
 import re
+import asyncio
 from typing import Dict, Tuple, Any
 import datetime
 
@@ -17,7 +18,18 @@ class PRHandler:
         self.pr_notifications: Dict[Tuple[str, str], discord.Message] = {}
         # Dictionary to store PR threads: key: (repository, pr_number), value: thread
         self.pr_threads: Dict[Tuple[str, str], discord.Thread] = {}
-    
+        # Per-PR locks so concurrent webhook events for the same PR can't each
+        # create a duplicate notification (check-then-act must be atomic).
+        self._pr_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
+
+    def _lock_for(self, key: Tuple[str, str]) -> asyncio.Lock:
+        """Return the lock for a PR key, creating it on first use.
+
+        setdefault is atomic within the single-threaded event loop, so this is
+        race-free as long as no await occurs between lookup and insert.
+        """
+        return self._pr_locks.setdefault(key, asyncio.Lock())
+
     async def handle_pr_command(self, message: discord.Message) -> None:
         """Handle manual PR thread creation command (!pr)."""
         # Extract the content after the command
@@ -106,8 +118,25 @@ class PRHandler:
         else:
             print(f"No thread found for PR {key}")
     
-    async def create_or_update_pr(self, repository: str, pr_number: str, action: str, 
-                                 title: str, url: str = None, author: str = None, 
+    async def create_or_update_pr(self, repository: str, pr_number: str, action: str,
+                                 title: str, url: str = None, author: str = None,
+                                 channel: discord.TextChannel = None) -> discord.Message:
+        """Create or update a PR notification, serialized per PR.
+
+        Holding the per-PR lock across the whole create-or-update makes the
+        `key in self.pr_notifications` check-then-act atomic, so a burst of
+        concurrent events for one PR (opened + labeled + assigned ...) creates
+        a single card that later events update, instead of racing to post
+        duplicate cards that close events can never reach.
+        """
+        key = (repository, pr_number)
+        async with self._lock_for(key):
+            return await self._create_or_update_pr_unlocked(
+                repository, pr_number, action, title, url, author, channel
+            )
+
+    async def _create_or_update_pr_unlocked(self, repository: str, pr_number: str, action: str,
+                                 title: str, url: str = None, author: str = None,
                                  channel: discord.TextChannel = None) -> discord.Message:
         """Create a new PR notification or update an existing one."""
         key = (repository, pr_number)
