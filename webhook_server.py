@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import datetime
 import asyncio
 from typing import Dict, Any, Optional
@@ -25,6 +26,51 @@ app = Flask(__name__)
 # Reference to the Discord bot
 bot = None
 public_url = None
+
+@app.route('/')
+def landing_page():
+    """Landing page with bot invite and setup instructions."""
+    invite_url = os.getenv('BOT_INVITE_URL', '')
+    return f'''<!DOCTYPE html>
+<html>
+<head>
+    <title>Discord PR Manager</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px; background: #36393f; color: #dcddde; }}
+        h1 {{ color: #fff; }}
+        a {{ color: #00b0f4; }}
+        code {{ background: #2f3136; padding: 2px 6px; border-radius: 3px; }}
+        .invite-btn {{ display: inline-block; background: #5865f2; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 20px 0; }}
+        .invite-btn:hover {{ background: #4752c4; }}
+        .step {{ background: #2f3136; padding: 15px; border-radius: 8px; margin: 10px 0; }}
+    </style>
+</head>
+<body>
+    <h1>Discord PR Manager Bot</h1>
+    <p>Get GitHub PR notifications directly in your Discord channels.</p>
+
+    <a href="{invite_url}" class="invite-btn">Add Bot to Your Server</a>
+
+    <h2>Setup</h2>
+    <div class="step">
+        <strong>Step 1:</strong> Click the button above to add the bot to your Discord server
+    </div>
+    <div class="step">
+        <strong>Step 2:</strong> Go to the channel where you want PR notifications
+    </div>
+    <div class="step">
+        <strong>Step 3:</strong> Type <code>!prbot webhook</code> - the bot will DM you a GitHub webhook URL
+    </div>
+    <div class="step">
+        <strong>Step 4:</strong> Add that URL to your GitHub repo (Settings → Webhooks → Add webhook)
+    </div>
+
+    <h2>Commands</h2>
+    <p><code>!prbot webhook</code> - Generate webhook URL for current channel</p>
+    <p><code>!prbot status</code> - Show current configuration</p>
+    <p><code>!pr [url]</code> - Manually create a PR notification</p>
+</body>
+</html>'''
 
 def set_bot_instance(bot_instance):
     """Set the Discord bot instance to allow webhook server to interact with Discord."""
@@ -173,8 +219,9 @@ async def process_pull_request(payload: Dict[str, Any], guild_id: int, channel_i
                     # Post status update to thread if this is a status change
                     pr_key = (repo_name, str(pr_number))
                     status_update = f"**Status Update:** {action.capitalize()}"
-                    if pr_body and len(pr_body.strip()) > 0:
-                        status_update += f"\n\n*Description:* {truncate_text(pr_body, 200)}"
+                    cleaned_body = clean_body_text(pr_body)
+                    if cleaned_body:
+                        status_update += f"\n\n*Description:* {truncate_text(cleaned_body, 200)}"
                     
                     await bot.pr_handler.post_thread_update(pr_key, status_update)
                 else:
@@ -204,6 +251,23 @@ def get_pr_color(action: str, is_merged: bool) -> int:
         return discord.Color.light_grey().value
     else:
         return discord.Color.blurple().value
+
+# Blocks other bots inject into PR bodies, e.g. <!-- pr-diff-breakdown:start --> ... <!-- pr-diff-breakdown:end -->
+MARKED_BLOCK_PATTERN = re.compile(
+    r'<!--\s*([\w.:-]+?)[:-](?:start|begin)\s*-->.*?<!--\s*\1[:-](?:end|stop)\s*-->',
+    re.DOTALL | re.IGNORECASE
+)
+HTML_COMMENT_PATTERN = re.compile(r'<!--.*?-->', re.DOTALL)
+BLANK_LINES_PATTERN = re.compile(r'\n{3,}')
+
+def clean_body_text(text: str) -> str:
+    """Strip bot-injected blocks and HTML comments out of GitHub markdown bodies."""
+    if not text:
+        return ""
+    text = MARKED_BLOCK_PATTERN.sub('', text)
+    text = HTML_COMMENT_PATTERN.sub('', text)
+    text = BLANK_LINES_PATTERN.sub('\n\n', text)
+    return text.strip()
 
 def truncate_text(text: str, max_length: int) -> str:
     """Truncate text to max_length and add ellipsis if needed."""
@@ -295,8 +359,9 @@ async def process_pr_review(payload: Dict[str, Any], guild_id: int, channel_id: 
         # Enhanced message with PR context
         update_message = f"{emoji} **{reviewer}** {status} PR **\"{pr_title}\"** by **{pr_author}**"
         
-        if review_body:
-            update_message += f"\n\n*Review:* {truncate_text(review_body, 300)}"
+        cleaned_review = clean_body_text(review_body)
+        if cleaned_review:
+            update_message += f"\n\n*Review:* {truncate_text(cleaned_review, 300)}"
         
         if review_url:
             update_message += f"\n\n[View Review]({review_url})"
@@ -346,8 +411,9 @@ async def process_pr_comment(payload: Dict[str, Any], guild_id: int, channel_id:
         else:
             return  # Don't process other comment actions
         
-        if comment_body:
-            update_message += f"\n\n*Comment:* {truncate_text(comment_body, 400)}"
+        cleaned_comment = clean_body_text(comment_body)
+        if cleaned_comment:
+            update_message += f"\n\n*Comment:* {truncate_text(cleaned_comment, 400)}"
         
         if comment_url:
             update_message += f"\n\n[View Comment]({comment_url})"
@@ -390,8 +456,9 @@ async def process_pr_review_comment(payload: Dict[str, Any], guild_id: int, chan
             if file_path:
                 update_message += f"\n\n*File:* `{file_path}`"
             
-            if comment_body:
-                update_message += f"\n\n*Code review:* {truncate_text(comment_body, 400)}"
+            cleaned_comment = clean_body_text(comment_body)
+            if cleaned_comment:
+                update_message += f"\n\n*Code review:* {truncate_text(cleaned_comment, 400)}"
             
             if comment_url:
                 update_message += f"\n\n[View Code Comment]({comment_url})"

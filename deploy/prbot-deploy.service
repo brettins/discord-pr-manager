@@ -1,0 +1,12 @@
+[Unit]
+Description=Deploy Discord PR Manager Bot from origin/main
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=prbot
+WorkingDirectory=/home/prbot/discord-pr-manager
+ExecStart=/usr/bin/flock -n /tmp/prbot-deploy.lock /home/prbot/discord-pr-manager/deploy/prbot-deploy.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=prbot-deploy

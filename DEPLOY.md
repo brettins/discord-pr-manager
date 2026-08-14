@@ -120,16 +120,57 @@ sudo systemctl start prbot
     - `WEBHOOK_BASE_URL`: The public URL where your bot is hosted
     - `WEBHOOK_HOST`: The local host where the bot is running
     - `WEBHOOK_PORT`: The port where the bot is listening
+    - `BOT_INVITE_URL`: Invite link used by the landing page button
 
 2. **Webhook Configuration**: With this setup, your webhook URL format will be:
 `https://prbot.simpleconnections.ca/webhook/{guild_id}/{channel_id}/{token}`
 
-3. **Updating the Bot**: When you need to update your bot:
+3. **Updating the Bot**: Merging to `main` deploys itself — see below. To force a
+deploy without waiting for the timer:
+```bash
+sudo systemctl start prbot-deploy
+```
+
+To update by hand instead:
 ```bash
 su - prbot
 cd discord-pr-manager
 git pull
 source bot-env/bin/activate
 pip install -r requirements.txt
-sudo systemctl restart discord-bot
+sudo systemctl restart prbot
+```
+
+## Automatic Deploys
+
+A systemd timer checks `origin/main` every 2 minutes. When the remote SHA moves it
+asks the GitHub check-runs API whether that commit's CI passed, and only then
+fast-forwards, installs requirements and restarts the bot. A commit with failing or
+still-running checks is left alone and retried on the next tick.
+
+The merge is `--ff-only`, so if someone has committed directly on the droplet the
+deploy fails loudly rather than discarding that work. Recover by pushing those
+commits to `origin` first.
+
+Install once, as root:
+
+```bash
+cd /home/prbot/discord-pr-manager
+chmod +x deploy/prbot-deploy.sh
+cp deploy/prbot-deploy.service deploy/prbot-deploy.timer /etc/systemd/system/
+
+# Let the bot user restart its own service
+echo 'prbot ALL=(root) NOPASSWD: /usr/bin/systemctl restart prbot.service' \
+    > /etc/sudoers.d/prbot-deploy
+chmod 440 /etc/sudoers.d/prbot-deploy
+
+systemctl daemon-reload
+systemctl enable --now prbot-deploy.timer
+```
+
+Watch what it's doing:
+
+```bash
+systemctl list-timers prbot-deploy.timer
+journalctl -u prbot-deploy -n 50
 ```
