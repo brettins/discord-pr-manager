@@ -13,8 +13,11 @@ def get_status_color(status: str) -> discord.Color:
     """Get appropriate color for different PR statuses using 3-tier system."""
     status = status.lower()
     
+    # Draft - not asking for attention yet (Grey)
+    if status in ["draft", "converted_to_draft"]:
+        return discord.Color.light_grey()
     # Before merge states (Green)
-    if status in ["opened", "open", "reopened", "ready_for_review", "review_requested", "draft"]:
+    elif status in ["opened", "open", "reopened", "ready_for_review", "review_requested"]:
         return discord.Color.green()
     # Merged state (Purple)
     elif status == "merged":
@@ -39,7 +42,7 @@ def get_status_icon(status: str) -> str:
         return "👀"  # Eyes for ready for review (looking for approval)
     elif status == "review_requested":
         return "📝"  # Memo for review requested (needs feedback)
-    elif status == "draft":
+    elif status in ("draft", "converted_to_draft"):
         return "🛠️"  # Hammer and wrench for draft (work in progress)
     # Merged state - success!
     elif status == "merged":
