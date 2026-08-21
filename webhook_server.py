@@ -177,11 +177,7 @@ async def process_pull_request(payload: Dict[str, Any], guild_id: int, channel_i
         repo_data = payload.get('repository', {})
         repo_name = repo_data.get('full_name', '')
         
-        # Check if the PR was merged (closed + merged flag)
-        is_merged = False
-        if action == 'closed' and pr_data.get('merged', False):
-            action = 'merged'
-            is_merged = True
+        action = resolve_pr_state(action, pr_data)
         
         # Try to get the guild and channel
         guild = bot.get_guild(guild_id)
@@ -234,23 +230,18 @@ async def process_pull_request(payload: Dict[str, Any], guild_id: int, channel_i
     except Exception as e:
         print(f"Error processing webhook: {e}")
 
-def get_pr_color(action: str, is_merged: bool) -> int:
-    """Get the appropriate color for the PR status."""
-    if is_merged:
-        return discord.Color.purple().value
-    
-    action = action.lower()
-    if action == 'opened' or action == 'open':
-        return discord.Color.yellow().value
-    elif action == 'closed':
-        # Use red for closed PRs (changes weren't incorporated)
-        return discord.Color.red().value
-    elif action == 'reopened':
-        return discord.Color.orange().value
-    elif 'draft' in action:
-        return discord.Color.light_grey().value
-    else:
-        return discord.Color.blurple().value
+def resolve_pr_state(action: str, pr_data: Dict[str, Any]) -> str:
+    """Map a GitHub pull_request action to the state the bot displays.
+
+    GitHub reports a draft PR opening as action 'opened' with draft=true, so the
+    action alone can't tell a draft apart from a PR that wants review. Closed and
+    merged outrank draft: a draft that gets closed should read as closed.
+    """
+    if action == 'closed':
+        return 'merged' if pr_data.get('merged', False) else 'closed'
+    if pr_data.get('draft', False):
+        return 'draft'
+    return action
 
 # Blocks other bots inject into PR bodies, e.g. <!-- pr-diff-breakdown:start --> ... <!-- pr-diff-breakdown:end -->
 MARKED_BLOCK_PATTERN = re.compile(
